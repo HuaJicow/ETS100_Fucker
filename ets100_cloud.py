@@ -1011,6 +1011,32 @@ def first_existing_path(paths: Iterable[str | Path | None]) -> str | None:
     return None
 
 
+def load_truetype_font(font_path: str, size: int, bold: bool):
+    from PIL import ImageFont
+
+    font = ImageFont.truetype(font_path, size=size)
+    if bold and hasattr(font, "get_variation_axes") and hasattr(font, "set_variation_by_axes"):
+        try:
+            axes = font.get_variation_axes()
+            values = []
+            for axis in axes:
+                name = axis.get("name", b"")
+                if isinstance(name, bytes):
+                    name = name.decode("ascii", errors="ignore")
+                minimum = axis.get("minimum", axis.get("min", 0))
+                maximum = axis.get("maximum", axis.get("max", 1000))
+                default = axis.get("default", axis.get("def", minimum))
+                if "Weight" in str(name) or "wght" in str(name).lower():
+                    values.append(min(maximum, max(minimum, 700)))
+                else:
+                    values.append(default)
+            if values:
+                font.set_variation_by_axes(values)
+        except Exception:
+            pass
+    return font
+
+
 def load_font(size: int, bold: bool = False):
     try:
         from PIL import ImageFont
@@ -1028,8 +1054,9 @@ def load_font(size: int, bold: bool = False):
     )
     cjk_font = first_existing_path(
         [
-            "C:/Windows/Fonts/NotoSansSC-VF.ttf",
             "C:/Windows/Fonts/msyhbd.ttc" if bold else "C:/Windows/Fonts/msyh.ttc",
+            "C:/Windows/Fonts/msyh.ttc",
+            "C:/Windows/Fonts/NotoSansSC-VF.ttf",
             "C:/Windows/Fonts/simhei.ttf",
             "C:/Windows/Fonts/Dengb.ttf" if bold else "C:/Windows/Fonts/Deng.ttf",
             "C:/Windows/Fonts/simsun.ttc",
@@ -1037,19 +1064,20 @@ def load_font(size: int, bold: bool = False):
     )
 
     if google_font and cjk_font:
-        return FontStack(ImageFont.truetype(google_font, size=size), ImageFont.truetype(cjk_font, size=size))
+        return FontStack(load_truetype_font(google_font, size, bold), load_truetype_font(cjk_font, size, bold))
 
     font_candidates = [
         google_font,
-        "C:/Windows/Fonts/NotoSansSC-VF.ttf",
         "C:/Windows/Fonts/msyhbd.ttc" if bold else "C:/Windows/Fonts/msyh.ttc",
+        "C:/Windows/Fonts/msyh.ttc",
+        "C:/Windows/Fonts/NotoSansSC-VF.ttf",
         "C:/Windows/Fonts/simhei.ttf",
         "C:/Windows/Fonts/Dengb.ttf" if bold else "C:/Windows/Fonts/Deng.ttf",
         "C:/Windows/Fonts/simsun.ttc",
     ]
     font_path = first_existing_path(font_candidates)
     if font_path:
-        return ImageFont.truetype(font_path, size=size)
+        return load_truetype_font(font_path, size, bold)
     return ImageFont.load_default()
 
 
@@ -1162,9 +1190,9 @@ def render_paper_image(paper: dict[str, Any], output_path: Path, width: int = 16
 
     title_font = load_font(46, bold=True)
     heading_font = load_font(32, bold=True)
-    body_font = load_font(30)
+    body_font = load_font(30, bold=True)
     label_font = load_font(30, bold=True)
-    footer_font = load_font(26)
+    footer_font = load_font(26, bold=True)
     footer_text = "ETS100_Fucker 目前处于内测阶段，输出的答案可能不准确"
     margin = 72
     content_width = width - margin * 2
