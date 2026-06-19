@@ -1027,7 +1027,7 @@ def load_truetype_font(font_path: str, size: int, bold: bool):
                 maximum = axis.get("maximum", axis.get("max", 1000))
                 default = axis.get("default", axis.get("def", minimum))
                 if "Weight" in str(name) or "wght" in str(name).lower():
-                    values.append(min(maximum, max(minimum, 700)))
+                    values.append(min(maximum, max(minimum, 500)))
                 else:
                     values.append(default)
             if values:
@@ -1054,7 +1054,6 @@ def load_font(size: int, bold: bool = False):
     )
     cjk_font = first_existing_path(
         [
-            "C:/Windows/Fonts/msyhbd.ttc" if bold else "C:/Windows/Fonts/msyh.ttc",
             "C:/Windows/Fonts/msyh.ttc",
             "C:/Windows/Fonts/NotoSansSC-VF.ttf",
             "C:/Windows/Fonts/simhei.ttf",
@@ -1068,7 +1067,6 @@ def load_font(size: int, bold: bool = False):
 
     font_candidates = [
         google_font,
-        "C:/Windows/Fonts/msyhbd.ttc" if bold else "C:/Windows/Fonts/msyh.ttc",
         "C:/Windows/Fonts/msyh.ttc",
         "C:/Windows/Fonts/NotoSansSC-VF.ttf",
         "C:/Windows/Fonts/simhei.ttf",
