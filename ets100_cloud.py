@@ -961,31 +961,127 @@ def build_image_answer_items(paper: dict[str, Any]) -> list[dict[str, str]]:
     return items
 
 
+class FontStack:
+    def __init__(self, primary: Any, fallback: Any):
+        self.primary = primary
+        self.fallback = fallback
+
+    def iter_runs(self, text: str):
+        current_font = None
+        current = ""
+        for char in text:
+            font = self.fallback if needs_cjk_font(char) else self.primary
+            if current and font is not current_font:
+                yield current_font, current
+                current = ""
+            current_font = font
+            current += char
+        if current:
+            yield current_font, current
+
+    def getbbox(self, text: str):
+        width = 0
+        top = 0
+        bottom = 0
+        for font, run in self.iter_runs(text):
+            left, run_top, right, run_bottom = font.getbbox(run)
+            width += right - left
+            top = min(top, run_top)
+            bottom = max(bottom, run_bottom)
+        return (0, top, width, bottom)
+
+
+def needs_cjk_font(char: str) -> bool:
+    code = ord(char)
+    return (
+        0x2E80 <= code <= 0x9FFF
+        or 0xF900 <= code <= 0xFAFF
+        or 0x3000 <= code <= 0x303F
+        or 0xFF00 <= code <= 0xFFEF
+    )
+
+
+def first_existing_path(paths: Iterable[str | Path | None]) -> str | None:
+    for path in paths:
+        if not path:
+            continue
+        font_path = Path(path)
+        if font_path.exists():
+            return str(font_path)
+    return None
+
+
 def load_font(size: int, bold: bool = False):
     try:
         from PIL import ImageFont
     except ImportError as exc:
         raise ETS100Error("image output requires Pillow; run: python -m pip install -r requirements.txt") from exc
 
+    local_fonts = Path(os.environ.get("LOCALAPPDATA", "")) / "Microsoft" / "Windows" / "Fonts"
+    google_font = first_existing_path(
+        [
+            local_fonts / "GoogleSans-VariableFont_GRAD,opsz,wght.ttf",
+            local_fonts / "GoogleSans-Regular.ttf",
+            "C:/Windows/Fonts/GoogleSans-VariableFont_GRAD,opsz,wght.ttf",
+            "C:/Windows/Fonts/GoogleSans-Regular.ttf",
+        ]
+    )
+    cjk_font = first_existing_path(
+        [
+            "C:/Windows/Fonts/NotoSansSC-VF.ttf",
+            "C:/Windows/Fonts/msyhbd.ttc" if bold else "C:/Windows/Fonts/msyh.ttc",
+            "C:/Windows/Fonts/simhei.ttf",
+            "C:/Windows/Fonts/Dengb.ttf" if bold else "C:/Windows/Fonts/Deng.ttf",
+            "C:/Windows/Fonts/simsun.ttc",
+        ]
+    )
+
+    if google_font and cjk_font:
+        return FontStack(ImageFont.truetype(google_font, size=size), ImageFont.truetype(cjk_font, size=size))
+
     font_candidates = [
+        google_font,
         "C:/Windows/Fonts/NotoSansSC-VF.ttf",
         "C:/Windows/Fonts/msyhbd.ttc" if bold else "C:/Windows/Fonts/msyh.ttc",
         "C:/Windows/Fonts/simhei.ttf",
         "C:/Windows/Fonts/Dengb.ttf" if bold else "C:/Windows/Fonts/Deng.ttf",
         "C:/Windows/Fonts/simsun.ttc",
     ]
-    for font_path in font_candidates:
-        if font_path and Path(font_path).exists():
-            return ImageFont.truetype(font_path, size=size)
+    font_path = first_existing_path(font_candidates)
+    if font_path:
+        return ImageFont.truetype(font_path, size=size)
     return ImageFont.load_default()
 
 
 def text_width(draw: Any, text: str, font: Any) -> float:
+    if isinstance(font, FontStack):
+        return sum(text_width(draw, run, run_font) for run_font, run in font.iter_runs(text))
     try:
         return draw.textlength(text, font=font)
     except Exception:
         left, _, right, _ = draw.textbbox((0, 0), text, font=font)
         return right - left
+
+
+def draw_text(draw: Any, xy: tuple[float, float], text: str, font: Any, fill: str) -> None:
+    x, y = xy
+    if isinstance(font, FontStack):
+        for run_font, run in font.iter_runs(text):
+            draw.text((x, y), run, font=run_font, fill=fill)
+            x += text_width(draw, run, run_font)
+        return
+    draw.text((x, y), text, font=font, fill=fill)
+
+
+def line_height(font: Any, line_gap: int) -> int:
+    if isinstance(font, FontStack):
+        heights = []
+        for item in (font.primary, font.fallback):
+            top, bottom = item.getbbox("Hg测")[1], item.getbbox("Hg测")[3]
+            heights.append(bottom - top)
+        return max(heights) + line_gap
+    bbox = font.getbbox("Hg")
+    return bbox[3] - bbox[1] + line_gap
 
 
 def wrap_text(draw: Any, text: str, font: Any, max_width: int) -> list[str]:
@@ -1050,11 +1146,11 @@ def draw_wrapped_text(
     line_gap: int,
 ) -> int:
     x, y = xy
-    line_height = font.getbbox("Hg")[3] - font.getbbox("Hg")[1] + line_gap
+    item_line_height = line_height(font, line_gap)
     for line in wrap_text(draw, text, font, max_width):
         if line:
-            draw.text((x, y), line, font=font, fill=fill)
-        y += line_height
+            draw_text(draw, (x, y), line, font=font, fill=fill)
+        y += item_line_height
     return y
 
 
@@ -1125,7 +1221,7 @@ def render_paper_image(paper: dict[str, Any], output_path: Path, width: int = 16
     footer_width = text_width(draw, footer_text, footer_font)
     footer_x = int((width - footer_width) / 2)
     footer_y = height - footer_bottom_margin - footer_height
-    draw.text((footer_x, footer_y), footer_text, font=footer_font, fill="#9ca3af")
+    draw_text(draw, (footer_x, footer_y), footer_text, font=footer_font, fill="#9ca3af")
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     image.save(output_path)
